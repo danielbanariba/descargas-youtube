@@ -3,10 +3,8 @@ import yt_dlp
 import os
 import librosa
 import numpy as np
-import soundfile as sf
 import tempfile
 import pygame
-from pydub import AudioSegment
 import shutil
 import glob
 
@@ -22,6 +20,7 @@ class State(rx.State):
     is_playing: bool = False
     audio_duration: float = 0
     temp_dir: str = ""
+    manual_bpm: float = 0
 
     def get_video_info(self):
         if not self.url:
@@ -101,14 +100,9 @@ class State(rx.State):
             print(f"Audio cargado. Duración: {self.audio_duration} segundos")
 
             # Detectar el tempo y los beats
-            tempo, beat_frames = librosa.beat.beat_track(y=y, sr=sr)
-            
-            # Manejar el caso en que tempo sea un array
-            if isinstance(tempo, np.ndarray):
-                tempo = np.mean(tempo)  # Tomar el promedio si es un array
-            
+            tempo, beats = librosa.beat.beat_track(y=y, sr=sr)
             self.bpm = round(float(tempo), 2)
-            self.beat_times = librosa.frames_to_time(beat_frames, sr=sr).tolist()
+            self.beat_times = librosa.frames_to_time(beats, sr=sr).tolist()
 
             print(f"Análisis completado. BPM: {self.bpm}")
             self.status = f"Análisis completado. BPM: {self.bpm}"
@@ -138,10 +132,12 @@ class State(rx.State):
             pygame.mixer.music.load(self.audio_file)
             
             # Crear un sonido de metrónomo simple (estéreo)
-            duration = 0.1  # duración del sonido en segundos
+            duration = 0.05  # duración del sonido en segundos
             sample_rate = 44100
             t = np.linspace(0, duration, int(sample_rate * duration), False)
-            tone = np.sin(2 * np.pi * 440 * t) * 0.5
+            tone = np.sin(2 * np.pi * 1000 * t) * 0.5
+            fade = np.linspace(1, 0, len(tone))
+            tone = tone * fade
             stereo_tone = np.column_stack((tone, tone))  # Crear array estéreo
             metronome_sound = pygame.sndarray.make_sound((stereo_tone * 32767).astype(np.int16))
 
@@ -150,12 +146,15 @@ class State(rx.State):
             pygame.mixer.music.play()
 
             # Reproducir el metrónomo en los tiempos de beat
+            start_time = pygame.time.get_ticks()
             for beat_time in self.beat_times:
-                pygame.time.wait(int(beat_time * 1000))  # Esperar hasta el tiempo del beat
-                if self.is_playing:
-                    metronome_sound.play()
-                else:
+                if not self.is_playing:
                     break
+                current_time = pygame.time.get_ticks() - start_time
+                wait_time = int(beat_time * 1000) - current_time
+                if wait_time > 0:
+                    pygame.time.wait(wait_time)
+                metronome_sound.play()
 
             pygame.mixer.music.stop()
             self.is_playing = False
@@ -198,6 +197,22 @@ class State(rx.State):
             print(f"Directorio temporal eliminado: {self.temp_dir}")
         self.temp_dir = ""
         self.audio_file = ""
+
+    def set_manual_bpm(self, value):
+        try:
+            self.manual_bpm = float(value)
+        except ValueError:
+            self.status = "Por favor, ingresa un valor numérico válido para BPM."
+
+    def use_manual_bpm(self):
+        if self.manual_bpm > 0:
+            self.bpm = self.manual_bpm
+            # Recalcular los beat_times basados en el BPM manual
+            beat_duration = 60 / self.bpm
+            self.beat_times = [i * beat_duration for i in range(int(self.audio_duration / beat_duration))]
+            self.status = f"BPM manual establecido: {self.bpm}"
+        else:
+            self.status = "Por favor, ingresa un valor válido de BPM antes de usar."
 
 def index():
     return rx.box(
@@ -254,6 +269,23 @@ def index():
                     bg="#607D8B",
                     color="white",
                     _hover={"bg": "#546E7A"},
+                ),
+                width="100%",
+                justify="space-between",
+            ),
+            rx.hstack(
+                rx.input(
+                    placeholder="BPM manual",
+                    on_change=State.set_manual_bpm,
+                    type_="number",
+                    width="50%",
+                ),
+                rx.button(
+                    "Usar BPM Manual",
+                    on_click=State.use_manual_bpm,
+                    bg="#009688",
+                    color="white",
+                    _hover={"bg": "#00897B"},
                 ),
                 width="100%",
                 justify="space-between",
