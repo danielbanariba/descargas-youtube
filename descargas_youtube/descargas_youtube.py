@@ -24,6 +24,9 @@ class State(rx.State):
     audio_duration: float = 0
     temp_dir: str = ""
     manual_bpm: float = 0
+    metronome_volume: float = -20
+    download_progress: int = 0
+    temp_files: list = []
 
     def get_video_info(self):
         if not self.url:
@@ -51,14 +54,12 @@ class State(rx.State):
             return
 
         try:
-            # Crear un directorio temporal
             self.temp_dir = tempfile.mkdtemp()
             self.audio_file = os.path.join(self.temp_dir, 'audio.mp3')
             
             print(f"Directorio temporal creado: {self.temp_dir}")
             print(f"Archivo de audio será: {self.audio_file}")
 
-            # Configurar las opciones de descarga
             ydl_opts = {
                 'format': 'bestaudio/best',
                 'postprocessors': [{
@@ -72,19 +73,15 @@ class State(rx.State):
                 'verbose': True
             }
 
-            # Descargar el audio
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                 self.status = "Descargando audio para análisis..."
                 print(f"Iniciando descarga de: {self.url}")
                 ydl.download([self.url])
 
-            # Verificar si el archivo se descargó correctamente
             if not os.path.exists(self.audio_file):
-                # Si el archivo MP3 no existe, buscar el archivo original
                 original_file = self.audio_file.rsplit('.', 1)[0] + '.*'
                 original_files = glob.glob(original_file)
                 if original_files:
-                    # Renombrar el archivo original a MP3
                     os.rename(original_files[0], self.audio_file)
                 else:
                     raise Exception(f"No se encontró ningún archivo de audio en: {self.temp_dir}")
@@ -95,14 +92,12 @@ class State(rx.State):
             
             print(f"Archivo descargado correctamente. Tamaño: {file_size} bytes")
 
-            # Analizar el audio
             self.status = "Analizando el audio..."
             y, sr = librosa.load(self.audio_file, sr=None)
             self.audio_duration = librosa.get_duration(y=y, sr=sr)
 
             print(f"Audio cargado. Duración: {self.audio_duration} segundos")
 
-            # Detectar el tempo y los beats
             tempo, beats = librosa.beat.beat_track(y=y, sr=sr)
             self.bpm = round(float(tempo), 2)
             self.beat_times = librosa.frames_to_time(beats, sr=sr).tolist()
@@ -115,9 +110,6 @@ class State(rx.State):
             print(f"Error detallado: {e}")
             import traceback
             print(traceback.format_exc())
-        finally:
-            # No eliminaremos el directorio temporal aquí para permitir la reproducción
-            pass
 
     def download_progress_hook(self, d):
         if d['status'] == 'finished':
@@ -140,14 +132,13 @@ class State(rx.State):
             pygame.mixer.init(frequency=44100, size=-16, channels=2, buffer=2048)
             pygame.mixer.music.load(self.audio_file)
             
-            # Crear un sonido de metrónomo simple (estéreo)
-            duration = 0.05  # duración del sonido en segundos
+            duration = 0.05
             sample_rate = 44100
             t = np.linspace(0, duration, int(sample_rate * duration), False)
             tone = np.sin(2 * np.pi * 1000 * t) * 0.5
             fade = np.linspace(1, 0, len(tone))
             tone = tone * fade
-            stereo_tone = np.column_stack((tone, tone))  # Crear array estéreo
+            stereo_tone = np.column_stack((tone, tone))
             metronome_sound = pygame.sndarray.make_sound((stereo_tone * 32767).astype(np.int16))
 
             self.status = "Reproduciendo con metrónomo..."
@@ -210,12 +201,12 @@ class State(rx.State):
             self.status = f"Error en la descarga: {str(e)}"
 
     def cleanup(self):
-        # Limpiar archivos temporales
         if self.temp_dir and os.path.exists(self.temp_dir):
-            shutil.rmtree(self.temp_dir)
+            shutil.rmtree(self.temp_dir, ignore_errors=True)
             print(f"Directorio temporal eliminado: {self.temp_dir}")
         self.temp_dir = ""
         self.audio_file = ""
+        self.cleanup_temp_files()
 
     def set_manual_bpm(self, value):
         try:
@@ -226,7 +217,6 @@ class State(rx.State):
     def use_manual_bpm(self):
         if self.manual_bpm > 0:
             self.bpm = self.manual_bpm
-            # Recalcular los beat_times basados en el BPM manual
             beat_duration = 60 / self.bpm
             self.beat_times = [i * beat_duration for i in range(int(self.audio_duration / beat_duration))]
             self.status = f"BPM manual establecido: {self.bpm}"
@@ -245,6 +235,13 @@ class State(rx.State):
         except Exception as e:
             self.status = f"Error al descargar audio limpio: {str(e)}"
 
+    def set_metronome_volume(self, value):
+        if isinstance(value, list) and len(value) > 0:
+            value = value[0]
+        try:
+            self.metronome_volume = float(value)
+        except ValueError:
+            print(f"Error: No se pudo convertir '{value}' a float")
 
     def download_audio_with_metronome(self):
         if not self.audio_file or not self.beat_times:
@@ -252,28 +249,90 @@ class State(rx.State):
             return
         
         try:
-            # Cargar el audio original
+            self.download_progress = 0
+            
             audio = AudioSegment.from_mp3(self.audio_file)
             
-            # Crear un sonido de metrónomo más suave
-            duration_ms = 20  # Duración más corta
+            duration_ms = 20
             metronome_sound = (Sine(880).to_audio_segment(duration=duration_ms)
                                .fade_in(5).fade_out(15)
-                               .apply_gain(-20))  # Reducir el volumen
+                               .apply_gain(self.metronome_volume))
             
-            # Agregar el metrónomo al audio
-            for beat_time in self.beat_times:
+            total_beats = len(self.beat_times)
+            for i, beat_time in enumerate(self.beat_times):
                 position_ms = int(beat_time * 1000)
                 audio = audio.overlay(metronome_sound, position=position_ms)
+                self.download_progress = int((i + 1) / total_beats * 100)
             
-            # Guardar el audio con metrónomo
             output_file = os.path.join(self.download_path, f"{self.video_info['title']}_with_metronome.mp3")
             audio.export(output_file, format="mp3")
             
             self.status = f"Audio con metrónomo descargado: {output_file}"
+            self.download_progress = 100
         except Exception as e:
             self.status = f"Error al descargar audio con metrónomo: {str(e)}"
-            print(f"Error detallado: {e}")  # Para debugging
+            print(f"Error detallado: {e}")
+        finally:
+            self.download_progress = 0
+
+    def preview_with_metronome(self):
+        if not self.audio_file or not self.beat_times:
+            self.status = "Por favor, analiza el audio primero."
+            return
+
+        try:
+            with tempfile.NamedTemporaryFile(suffix='.mp3', delete=False) as temp_file:
+                temp_filename = temp_file.name
+
+            self.temp_files.append(temp_filename)
+
+            audio = AudioSegment.from_mp3(self.audio_file)
+
+            duration_ms = 20
+            metronome_sound = (Sine(880).to_audio_segment(duration=duration_ms)
+                               .fade_in(5).fade_out(15)
+                               .apply_gain(self.metronome_volume))
+
+            preview_duration = min(10000, len(audio))
+            preview_audio = audio[:preview_duration]
+
+            for beat_time in self.beat_times:
+                if beat_time * 1000 > preview_duration:
+                    break
+                position_ms = int(beat_time * 1000)
+                preview_audio = preview_audio.overlay(metronome_sound, position=position_ms)
+
+            preview_audio.export(temp_filename, format="mp3")
+
+            pygame.mixer.init(frequency=44100, size=-16, channels=2, buffer=2048)
+            pygame.mixer.music.load(temp_filename)
+            pygame.mixer.music.play()
+
+            self.status = "Reproduciendo vista previa con metrónomo..."
+            self.is_playing = True
+
+            def cleanup():
+                pygame.time.wait(int(preview_duration))
+                pygame.mixer.music.stop()
+                self.is_playing = False
+                self.status = "Vista previa finalizada."
+                self.cleanup_temp_files()
+
+            threading.Thread(target=cleanup).start()
+
+        except Exception as e:
+            self.status = f"Error en la vista previa: {str(e)}"
+            self.is_playing = False
+            print(f"Error detallado: {e}")
+
+    def cleanup_temp_files(self):
+        for file in self.temp_files:
+            try:
+                if os.path.exists(file):
+                    os.unlink(file)
+            except PermissionError:
+                print(f"No se pudo eliminar {file}. Se intentará más tarde.")
+        self.temp_files = [f for f in self.temp_files if os.path.exists(f)]
 
 def index():
     return rx.box(
@@ -342,7 +401,7 @@ def index():
                 rx.input(
                     placeholder="BPM manual",
                     on_change=State.set_manual_bpm,
-                    type_="number",
+                    type="number",
                     width="50%",
                 ),
                 rx.button(
@@ -373,6 +432,25 @@ def index():
                 width="100%",
                 justify="space-between",
             ),
+            rx.vstack(
+                rx.text("Volumen del Metrónomo", color="white"),
+                rx.slider(
+                    min=-40,
+                    max=0,
+                    step=1,
+                    default_value=-20,
+                    on_change=State.set_metronome_volume,
+                    width="100%",
+                ),
+                rx.button(
+                    "Vista Previa con Metrónomo",
+                    on_click=State.preview_with_metronome,
+                    bg="#E91E63",
+                    color="white",
+                    _hover={"bg": "#D81B60"},
+                ),
+                width="100%",
+            ),
             rx.cond(
                 State.show_thumbnail,
                 rx.vstack(
@@ -391,6 +469,14 @@ def index():
             ),
             rx.text(State.status, color="rgba(255, 255, 255, 0.7)"),
             rx.text(f"BPM: {State.bpm}", color="rgba(255, 255, 255, 0.7)"),
+            rx.cond(
+                State.download_progress > 0,
+                rx.vstack(
+                    rx.text("Progreso de descarga:", color="white"),
+                    rx.progress(value=State.download_progress),
+                    width="100%",
+                ),
+            ),
             width="100%",
             max_width="600px",
             spacing="4",
