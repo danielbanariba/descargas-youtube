@@ -8,6 +8,8 @@ import pygame
 import shutil
 import glob
 import threading
+from pydub import AudioSegment
+from pydub.generators import Sine
 
 class State(rx.State):
     url: str = ""
@@ -231,6 +233,47 @@ class State(rx.State):
         else:
             self.status = "Por favor, ingresa un valor válido de BPM antes de usar."
 
+    def download_clean_audio(self):
+        if not self.audio_file:
+            self.status = "Por favor, analiza el audio primero."
+            return
+        
+        try:
+            output_file = os.path.join(self.download_path, f"{self.video_info['title']}_clean.mp3")
+            shutil.copy2(self.audio_file, output_file)
+            self.status = f"Audio limpio descargado: {output_file}"
+        except Exception as e:
+            self.status = f"Error al descargar audio limpio: {str(e)}"
+
+
+    def download_audio_with_metronome(self):
+        if not self.audio_file or not self.beat_times:
+            self.status = "Por favor, analiza el audio primero."
+            return
+        
+        try:
+            # Cargar el audio original
+            audio = AudioSegment.from_mp3(self.audio_file)
+            
+            # Crear un sonido de metrónomo más suave
+            duration_ms = 20  # Duración más corta
+            metronome_sound = (Sine(880).to_audio_segment(duration=duration_ms)
+                               .fade_in(5).fade_out(15)
+                               .apply_gain(-20))  # Reducir el volumen
+            
+            # Agregar el metrónomo al audio
+            for beat_time in self.beat_times:
+                position_ms = int(beat_time * 1000)
+                audio = audio.overlay(metronome_sound, position=position_ms)
+            
+            # Guardar el audio con metrónomo
+            output_file = os.path.join(self.download_path, f"{self.video_info['title']}_with_metronome.mp3")
+            audio.export(output_file, format="mp3")
+            
+            self.status = f"Audio con metrónomo descargado: {output_file}"
+        except Exception as e:
+            self.status = f"Error al descargar audio con metrónomo: {str(e)}"
+            print(f"Error detallado: {e}")  # Para debugging
 
 def index():
     return rx.box(
@@ -308,6 +351,24 @@ def index():
                     bg="#009688",
                     color="white",
                     _hover={"bg": "#00897B"},
+                ),
+                width="100%",
+                justify="space-between",
+            ),
+            rx.hstack(
+                rx.button(
+                    "Descargar Audio Limpio",
+                    on_click=State.download_clean_audio,
+                    bg="#3F51B5",
+                    color="white",
+                    _hover={"bg": "#3949AB"},
+                ),
+                rx.button(
+                    "Descargar con Metrónomo",
+                    on_click=State.download_audio_with_metronome,
+                    bg="#673AB7",
+                    color="white",
+                    _hover={"bg": "#5E35B1"},
                 ),
                 width="100%",
                 justify="space-between",
