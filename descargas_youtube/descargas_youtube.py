@@ -8,8 +8,10 @@ import pygame
 import shutil
 import glob
 import threading
+import asyncio
 from pydub import AudioSegment
 from pydub.generators import Sine
+import re
 
 class State(rx.State):
     url: str = ""
@@ -27,38 +29,59 @@ class State(rx.State):
     metronome_volume: float = -20
     download_progress: int = 0
     temp_files: list = []
+    progress_value: int = 0
+    is_processing: bool = False
 
-    def get_video_info(self):
+    @rx.background
+    async def get_video_info(self):
         if not self.url:
-            self.status = "Por favor, ingresa una URL válida."
+            async with self:
+                self.status = "Por favor, ingresa una URL válida."
             return
 
         try:
+            async with self:
+                self.is_processing = True
+                self.progress_value = 0
+                self.status = "Obteniendo información del video..."
+            
             ydl_opts = {'quiet': True}
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                self.status = "Obteniendo información del video..."
                 info = ydl.extract_info(self.url, download=False)
+            
+            async with self:
                 self.video_info = {
                     'title': info['title'],
                     'thumbnail': info['thumbnail']
                 }
                 self.show_thumbnail = True
                 self.status = "Información del video obtenida. Listo para analizar."
+                self.progress_value = 100
         except Exception as e:
-            self.status = f"Error: {str(e)}"
-            self.show_thumbnail = False
+            async with self:
+                self.status = f"Error: {str(e)}"
+                self.show_thumbnail = False
+        finally:
+            async with self:
+                self.is_processing = False
 
-    def analyze_audio(self):
+    @rx.background
+    async def analyze_audio(self):
         if not self.video_info:
-            self.status = "Por favor, obtén la información del video primero."
+            async with self:
+                self.status = "Por favor, obtén la información del video primero."
             return
 
         try:
-            self.temp_dir = tempfile.mkdtemp()
-            self.audio_file = os.path.join(self.temp_dir, 'audio.mp3')
+            async with self:
+                self.is_processing = True
+                self.progress_value = 0
+                self.temp_dir = tempfile.mkdtemp()
+                self.audio_file = os.path.join(self.temp_dir, 'audio.mp3')
+                self.status = "Descargando audio para análisis..."
             
-            print(f"Directorio temporal creado: {self.temp_dir}")
-            print(f"Archivo de audio será: {self.audio_file}")
+            def progress_hook(d):
+                asyncio.create_task(self.download_progress_hook(d))
 
             ydl_opts = {
                 'format': 'bestaudio/best',
@@ -68,14 +91,11 @@ class State(rx.State):
                     'preferredquality': '192',
                 }],
                 'outtmpl': self.audio_file,
-                'progress_hooks': [self.download_progress_hook],
+                'progress_hooks': [progress_hook],
                 'keepvideo': False,
-                'verbose': True
             }
 
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                self.status = "Descargando audio para análisis..."
-                print(f"Iniciando descarga de: {self.url}")
                 ydl.download([self.url])
 
             if not os.path.exists(self.audio_file):
@@ -86,36 +106,40 @@ class State(rx.State):
                 else:
                     raise Exception(f"No se encontró ningún archivo de audio en: {self.temp_dir}")
 
-            file_size = os.path.getsize(self.audio_file)
-            if file_size == 0:
-                raise Exception(f"El archivo está vacío: {self.audio_file}")
-            
-            print(f"Archivo descargado correctamente. Tamaño: {file_size} bytes")
+            async with self:
+                self.status = "Analizando el audio..."
+                self.progress_value = 50
 
-            self.status = "Analizando el audio..."
             y, sr = librosa.load(self.audio_file, sr=None)
-            self.audio_duration = librosa.get_duration(y=y, sr=sr)
-
-            print(f"Audio cargado. Duración: {self.audio_duration} segundos")
-
+            duration = librosa.get_duration(y=y, sr=sr)
             tempo, beats = librosa.beat.beat_track(y=y, sr=sr)
-            self.bpm = round(float(tempo), 2)
-            self.beat_times = librosa.frames_to_time(beats, sr=sr).tolist()
-
-            print(f"Análisis completado. BPM: {self.bpm}")
-            self.status = f"Análisis completado. BPM: {self.bpm}"
+            
+            async with self:
+                self.audio_duration = duration
+                self.bpm = round(float(tempo), 2)
+                self.beat_times = librosa.frames_to_time(beats, sr=sr).tolist()
+                self.progress_value = 100
+                self.status = f"Análisis completado. BPM: {self.bpm}"
 
         except Exception as e:
-            self.status = f"Error en el análisis: {str(e)}"
-            print(f"Error detallado: {e}")
-            import traceback
-            print(traceback.format_exc())
+            async with self:
+                self.status = f"Error en el análisis: {str(e)}"
+        finally:
+            async with self:
+                self.is_processing = False
 
-    def download_progress_hook(self, d):
-        if d['status'] == 'finished':
-            print('Descarga completada')
-        elif d['status'] == 'downloading':
-            print(f"Descargando: {d['_percent_str']} de {d['_total_bytes_str']}")
+    async def download_progress_hook(self, d):
+        if d['status'] == 'downloading':
+            p = d.get('_percent_str', '0%')
+            p = re.sub(r'\x1b\[[0-9;]*[a-zA-Z]', '', p)  # Eliminar códigos ANSI
+            p = p.replace('%', '').strip()
+            try:
+                percentage = float(p)
+                progress = int(percentage / 2)  # La descarga representa la primera mitad del proceso
+                async with self:
+                    self.progress_value = progress
+            except ValueError:
+                print(f"No se pudo convertir el porcentaje: {p}")
 
     def play_preview(self):
         if not self.audio_file or not self.beat_times:
@@ -167,9 +191,6 @@ class State(rx.State):
         except Exception as e:
             self.status = f"Error en la reproducción: {str(e)}"
             self.is_playing = False
-            print(f"Error detallado: {e}")
-            import traceback
-            print(traceback.format_exc())
 
     def pause_playback(self):
         if self.is_playing:
@@ -183,27 +204,42 @@ class State(rx.State):
             self.is_playing = False
             self.status = "Reproducción detenida."
 
-    def download_video(self):
+    @rx.background
+    async def download_video(self):
         if not self.video_info:
             self.status = "Por favor, obtén la información del video primero."
             return
 
         try:
+            async with self:
+                self.is_processing = True
+                self.progress_value = 0
+            
+            def progress_hook(d):
+                asyncio.create_task(self.download_progress_hook(d))
+
             ydl_opts = {
                 'outtmpl': os.path.join(self.download_path, '%(title)s.%(ext)s'),
                 'format': 'bestaudio/best',
+                'progress_hooks': [progress_hook],
             }
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                self.status = f"Descargando: {self.video_info['title']}"
+                async with self:
+                    self.status = f"Descargando: {self.video_info['title']}"
                 ydl.download([self.url])
-            self.status = "¡Descarga completada!"
+            async with self:
+                self.status = "¡Descarga completada!"
+                self.progress_value = 100
         except Exception as e:
-            self.status = f"Error en la descarga: {str(e)}"
+            async with self:
+                self.status = f"Error en la descarga: {str(e)}"
+        finally:
+            async with self:
+                self.is_processing = False
 
     def cleanup(self):
         if self.temp_dir and os.path.exists(self.temp_dir):
             shutil.rmtree(self.temp_dir, ignore_errors=True)
-            print(f"Directorio temporal eliminado: {self.temp_dir}")
         self.temp_dir = ""
         self.audio_file = ""
         self.cleanup_temp_files()
@@ -243,13 +279,16 @@ class State(rx.State):
         except ValueError:
             print(f"Error: No se pudo convertir '{value}' a float")
 
-    def download_audio_with_metronome(self):
+    @rx.background
+    async def download_audio_with_metronome(self):
         if not self.audio_file or not self.beat_times:
             self.status = "Por favor, analiza el audio primero."
             return
         
         try:
-            self.download_progress = 0
+            async with self:
+                self.is_processing = True
+                self.progress_value = 0
             
             audio = AudioSegment.from_mp3(self.audio_file)
             
@@ -262,18 +301,21 @@ class State(rx.State):
             for i, beat_time in enumerate(self.beat_times):
                 position_ms = int(beat_time * 1000)
                 audio = audio.overlay(metronome_sound, position=position_ms)
-                self.download_progress = int((i + 1) / total_beats * 100)
+                async with self:
+                    self.progress_value = int((i + 1) / total_beats * 100)
             
             output_file = os.path.join(self.download_path, f"{self.video_info['title']}_with_metronome.mp3")
             audio.export(output_file, format="mp3")
             
-            self.status = f"Audio con metrónomo descargado: {output_file}"
-            self.download_progress = 100
+            async with self:
+                self.status = f"Audio con metrónomo descargado: {output_file}"
+                self.progress_value = 100
         except Exception as e:
-            self.status = f"Error al descargar audio con metrónomo: {str(e)}"
-            print(f"Error detallado: {e}")
+            async with self:
+                self.status = f"Error al descargar audio con metrónomo: {str(e)}"
         finally:
-            self.download_progress = 0
+            async with self:
+                self.is_processing = False
 
     def preview_with_metronome(self):
         if not self.audio_file or not self.beat_times:
@@ -323,7 +365,6 @@ class State(rx.State):
         except Exception as e:
             self.status = f"Error en la vista previa: {str(e)}"
             self.is_playing = False
-            print(f"Error detallado: {e}")
 
     def cleanup_temp_files(self):
         for file in self.temp_files:
@@ -464,6 +505,14 @@ def index():
                     padding="4",
                     bg="rgba(0, 0, 0, 0.5)",
                     border_radius="md",
+                    width="100%",
+                ),
+            ),
+            rx.cond(
+                State.is_processing,
+                rx.vstack(
+                    rx.text("Procesando...", color="white"),
+                    rx.progress(value=State.progress_value),
                     width="100%",
                 ),
             ),
