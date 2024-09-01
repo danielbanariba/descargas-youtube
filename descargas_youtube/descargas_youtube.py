@@ -7,6 +7,7 @@ import tempfile
 import pygame
 import shutil
 import glob
+import threading
 
 class State(rx.State):
     url: str = ""
@@ -127,6 +128,12 @@ class State(rx.State):
             self.status = "Por favor, analiza el audio primero."
             return
 
+        if self.is_playing:
+            self.pause_playback()
+        else:
+            self.start_playback()
+
+    def start_playback(self):
         try:
             pygame.mixer.init(frequency=44100, size=-16, channels=2, buffer=2048)
             pygame.mixer.music.load(self.audio_file)
@@ -141,24 +148,28 @@ class State(rx.State):
             stereo_tone = np.column_stack((tone, tone))  # Crear array estéreo
             metronome_sound = pygame.sndarray.make_sound((stereo_tone * 32767).astype(np.int16))
 
-            self.status = "Reproduciendo vista previa con metrónomo..."
+            self.status = "Reproduciendo con metrónomo..."
             self.is_playing = True
             pygame.mixer.music.play()
 
-            # Reproducir el metrónomo en los tiempos de beat
-            start_time = pygame.time.get_ticks()
-            for beat_time in self.beat_times:
-                if not self.is_playing:
-                    break
-                current_time = pygame.time.get_ticks() - start_time
-                wait_time = int(beat_time * 1000) - current_time
-                if wait_time > 0:
-                    pygame.time.wait(wait_time)
-                metronome_sound.play()
+            def playback_thread():
+                start_time = pygame.time.get_ticks()
+                for beat_time in self.beat_times:
+                    if not self.is_playing:
+                        break
+                    current_time = pygame.time.get_ticks() - start_time
+                    wait_time = int(beat_time * 1000) - current_time
+                    if wait_time > 0:
+                        pygame.time.wait(wait_time)
+                    if self.is_playing:
+                        metronome_sound.play()
+                
+                if self.is_playing:
+                    pygame.mixer.music.stop()
+                    self.is_playing = False
+                    self.status = "Reproducción finalizada."
 
-            pygame.mixer.music.stop()
-            self.is_playing = False
-            self.status = "Vista previa finalizada."
+            threading.Thread(target=playback_thread).start()
 
         except Exception as e:
             self.status = f"Error en la reproducción: {str(e)}"
@@ -166,6 +177,12 @@ class State(rx.State):
             print(f"Error detallado: {e}")
             import traceback
             print(traceback.format_exc())
+
+    def pause_playback(self):
+        if self.is_playing:
+            pygame.mixer.music.pause()
+            self.is_playing = False
+            self.status = "Reproducción pausada."
 
     def stop_preview(self):
         if self.is_playing:
@@ -214,6 +231,7 @@ class State(rx.State):
         else:
             self.status = "Por favor, ingresa un valor válido de BPM antes de usar."
 
+
 def index():
     return rx.box(
         rx.vstack(
@@ -243,7 +261,11 @@ def index():
                     _hover={"bg": "#FB8C00"},
                 ),
                 rx.button(
-                    "Vista Previa",
+                    rx.cond(
+                        State.is_playing,
+                        "Pausar",
+                        "Reproducir"
+                    ),
                     on_click=State.play_preview,
                     bg="#9C27B0",
                     color="white",
