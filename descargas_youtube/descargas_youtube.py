@@ -21,6 +21,8 @@ class State(rx.State):
     show_thumbnail: bool = False
     audio_file: str = ""
     bpm: float = 0
+    half_bpm: float = 0
+    double_bpm: float = 0
     beat_times: list = []
     is_playing: bool = False
     audio_duration: float = 0
@@ -31,6 +33,7 @@ class State(rx.State):
     temp_files: list = []
     progress_value: int = 0
     is_processing: bool = False
+    tempo_option: str = "normal"
 
     @rx.background
     async def get_info_and_analyze(self):
@@ -58,7 +61,6 @@ class State(rx.State):
                 self.status = "Información del video obtenida. Comenzando análisis de audio..."
                 self.progress_value = 25
 
-            # Comenzar el análisis de audio
             temp_dir = tempfile.mkdtemp()
             audio_file = os.path.join(temp_dir, 'audio.mp3')
 
@@ -96,17 +98,19 @@ class State(rx.State):
             duration = librosa.get_duration(y=y, sr=sr)
             tempo, _ = librosa.beat.beat_track(y=y, sr=sr)
             
-            beat_duration = 60 / tempo
-            beat_times = np.arange(0, duration, beat_duration).tolist()
+            half_tempo = tempo / 2
+            double_tempo = tempo * 2
             
             async with self:
                 self.temp_dir = temp_dir
                 self.audio_file = audio_file
                 self.audio_duration = duration
                 self.bpm = round(float(tempo), 2)
-                self.beat_times = beat_times
+                self.half_bpm = round(float(half_tempo), 2)
+                self.double_bpm = round(float(double_tempo), 2)
+                self.update_beat_times()
                 self.progress_value = 100
-                self.status = f"Análisis completado. BPM: {self.bpm}"
+                self.status = f"Análisis completado. BPM: {self.bpm} (Lento: {self.half_bpm}, Rápido: {self.double_bpm})"
 
         except Exception as e:
             async with self:
@@ -116,14 +120,35 @@ class State(rx.State):
             async with self:
                 self.is_processing = False
 
+    def update_beat_times(self):
+        if self.tempo_option == "slow":
+            bpm = self.half_bpm
+        elif self.tempo_option == "fast":
+            bpm = self.double_bpm
+        else:
+            bpm = self.bpm
+        
+        beat_duration = 60 / bpm
+        self.beat_times = np.arange(0, self.audio_duration, beat_duration).tolist()
+
+    def set_tempo_option(self, option: str):
+        self.tempo_option = option
+        self.update_beat_times()
+        if option == "slow":
+            self.status = f"Tempo establecido a lento: {self.half_bpm} BPM"
+        elif option == "fast":
+            self.status = f"Tempo establecido a rápido: {self.double_bpm} BPM"
+        else:
+            self.status = f"Tempo establecido a normal: {self.bpm} BPM"
+
     async def download_progress_hook(self, d):
         if d['status'] == 'downloading':
             p = d.get('_percent_str', '0%')
-            p = re.sub(r'\x1b\[[0-9;]*[a-zA-Z]', '', p)  # Eliminar códigos ANSI
+            p = re.sub(r'\x1b\[[0-9;]*[a-zA-Z]', '', p)
             p = p.replace('%', '').strip()
             try:
                 percentage = float(p)
-                progress = int(percentage / 2)  # La descarga representa la primera mitad del proceso
+                progress = int(percentage / 2)
                 async with self:
                     self.progress_value = progress
             except ValueError:
@@ -242,8 +267,9 @@ class State(rx.State):
     def use_manual_bpm(self):
         if self.manual_bpm > 0:
             self.bpm = self.manual_bpm
-            beat_duration = 60 / self.bpm
-            self.beat_times = [i * beat_duration for i in range(int(self.audio_duration / beat_duration))]
+            self.half_bpm = self.bpm / 2
+            self.double_bpm = self.bpm * 2
+            self.update_beat_times()
             self.status = f"BPM manual establecido: {self.bpm}"
         else:
             self.status = "Por favor, ingresa un valor válido de BPM antes de usar."
@@ -472,6 +498,31 @@ def index():
                     width="100%",
                     justify="space-between",
                 ),
+                rx.hstack(
+                    rx.button(
+                        "Lento",
+                        on_click=lambda: State.set_tempo_option("slow"),
+                        bg="#FF9800",
+                        color="white",
+                        _hover={"bg": "#F57C00"},
+                    ),
+                    rx.button(
+                        "Normal",
+                        on_click=lambda: State.set_tempo_option("normal"),
+                        bg="#4CAF50",
+                        color="white",
+                        _hover={"bg": "#45a049"},
+                    ),
+                    rx.button(
+                        "Rápido",
+                        on_click=lambda: State.set_tempo_option("fast"),
+                        bg="#2196F3",
+                        color="white",
+                        _hover={"bg": "#1E88E5"},
+                    ),
+                    width="100%",
+                    justify="space-between",
+                ),
                 rx.vstack(
                     rx.text("Volumen del Metrónomo", color="white"),
                     rx.slider(
@@ -516,7 +567,7 @@ def index():
                     ),
                 ),
                 rx.text(State.status, color="rgba(255, 255, 255, 0.7)"),
-                rx.text(f"BPM: {State.bpm}", color="rgba(255, 255, 255, 0.7)"),
+                rx.text(f"BPM: {State.bpm} (Lento: {State.half_bpm}, Normal: {State.bpm}, Rápido: {State.double_bpm})", color="rgba(255, 255, 255, 0.7)"),
                 rx.cond(
                     State.download_progress > 0,
                     rx.vstack(
