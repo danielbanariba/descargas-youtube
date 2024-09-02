@@ -298,8 +298,8 @@ class State(rx.State):
             
             duration_ms = 20
             metronome_sound = (Sine(880).to_audio_segment(duration=duration_ms)
-                               .fade_in(5).fade_out(15)
-                               .apply_gain(self.metronome_volume))
+                                .fade_in(5).fade_out(15)
+                                .apply_gain(self.metronome_volume))
             
             total_beats = len(self.beat_times)
             for i, beat_time in enumerate(self.beat_times):
@@ -336,8 +336,8 @@ class State(rx.State):
 
             duration_ms = 20
             metronome_sound = (Sine(880).to_audio_segment(duration=duration_ms)
-                               .fade_in(5).fade_out(15)
-                               .apply_gain(self.metronome_volume))
+                                .fade_in(5).fade_out(15)
+                                .apply_gain(self.metronome_volume))
 
             preview_duration = min(10000, len(audio))
             preview_audio = audio[:preview_duration]
@@ -381,167 +381,188 @@ class State(rx.State):
 
 def index():
     return rx.box(
-        rx.vstack(
-            rx.heading("Descargador de YouTube con Metrónomo", size="lg", color="white"),
-            rx.input(
-                placeholder="Ingresa la URL del video de YouTube",
-                on_change=State.set_url,
+        rx.cond(
+            State.show_thumbnail,
+            rx.image(
+                src=State.video_info['thumbnail'],
+                position="absolute",
+                top="0",
+                left="0",
                 width="100%",
-                bg="rgba(255, 255, 255, 0.1)",
-                border="1px solid rgba(255, 255, 255, 0.2)",
-                color="white",
-                _placeholder={"color": "rgba(255, 255, 255, 0.5)"},
+                height="100%",
+                object_fit="cover",
+                filter="blur(10px)",
+                transform="scale(1.1)",
+                z_index="-1",
             ),
-            rx.hstack(
-                rx.button(
-                    "Obtener Info",
-                    on_click=State.get_video_info,
-                    bg="#4CAF50",
-                    color="white",
-                    _hover={"bg": "#45a049"},
-                ),
-                rx.button(
-                    "Analizar Audio",
-                    on_click=State.analyze_audio,
-                    bg="#FF9800",
-                    color="white",
-                    _hover={"bg": "#FB8C00"},
-                ),
-                rx.button(
-                    rx.cond(
-                        State.is_playing,
-                        "Pausar",
-                        "Reproducir"
-                    ),
-                    on_click=State.play_preview,
-                    bg="#9C27B0",
-                    color="white",
-                    _hover={"bg": "#8E24AA"},
-                ),
-                rx.button(
-                    "Detener",
-                    on_click=State.stop_preview,
-                    bg="#F44336",
-                    color="white",
-                    _hover={"bg": "#E53935"},
-                ),
-                rx.button(
-                    "Descargar",
-                    on_click=State.download_video,
-                    bg="#2196F3",
-                    color="white",
-                    _hover={"bg": "#1E88E5"},
-                ),
-                rx.button(
-                    "Limpiar",
-                    on_click=State.cleanup,
-                    bg="#607D8B",
-                    color="white",
-                    _hover={"bg": "#546E7A"},
-                ),
-                width="100%",
-                justify="space-between",
-            ),
-            rx.hstack(
-                rx.input(
-                    placeholder="BPM manual",
-                    on_change=State.set_manual_bpm,
-                    type="number",
-                    width="50%",
-                ),
-                rx.button(
-                    "Usar BPM Manual",
-                    on_click=State.use_manual_bpm,
-                    bg="#009688",
-                    color="white",
-                    _hover={"bg": "#00897B"},
-                ),
-                width="100%",
-                justify="space-between",
-            ),
-            rx.hstack(
-                rx.button(
-                    "Descargar Audio Limpio",
-                    on_click=State.download_clean_audio,
-                    bg="#3F51B5",
-                    color="white",
-                    _hover={"bg": "#3949AB"},
-                ),
-                rx.button(
-                    "Descargar con Metrónomo",
-                    on_click=State.download_audio_with_metronome,
-                    bg="#673AB7",
-                    color="white",
-                    _hover={"bg": "#5E35B1"},
-                ),
-                width="100%",
-                justify="space-between",
-            ),
+        ),
+        rx.box(
             rx.vstack(
-                rx.text("Volumen del Metrónomo", color="white"),
-                rx.slider(
-                    min=-40,
-                    max=0,
-                    step=1,
-                    default_value=-20,
-                    on_change=State.set_metronome_volume,
+                rx.heading("Descargador de YouTube con Metrónomo", size="lg", color="white"),
+                rx.input(
+                    placeholder="Ingresa la URL del video de YouTube",
+                    on_change=State.set_url,
+                    width="100%",
+                    bg="rgba(255, 255, 255, 0.1)",
+                    border="1px solid rgba(255, 255, 255, 0.2)",
+                    color="white",
+                    _placeholder={"color": "rgba(255, 255, 255, 0.5)"},
+                ),
+                rx.hstack(
+                    rx.button(
+                        "Obtener Info",
+                        on_click=State.get_video_info,
+                        bg="#4CAF50",
+                        color="white",
+                        _hover={"bg": "#45a049"},
+                    ),
+                    rx.button(
+                        "Analizar Audio",
+                        on_click=State.analyze_audio,
+                        bg="#FF9800",
+                        color="white",
+                        _hover={"bg": "#FB8C00"},
+                    ),
+                    rx.button(
+                        rx.cond(
+                            State.is_playing,
+                            "Pausar",
+                            "Reproducir"
+                        ),
+                        on_click=State.play_preview,
+                        bg="#9C27B0",
+                        color="white",
+                        _hover={"bg": "#8E24AA"},
+                    ),
+                    rx.button(
+                        "Detener",
+                        on_click=State.stop_preview,
+                        bg="#F44336",
+                        color="white",
+                        _hover={"bg": "#E53935"},
+                    ),
+                    rx.button(
+                        "Descargar",
+                        on_click=State.download_video,
+                        bg="#2196F3",
+                        color="white",
+                        _hover={"bg": "#1E88E5"},
+                    ),
+                    rx.button(
+                        "Limpiar",
+                        on_click=State.cleanup,
+                        bg="#607D8B",
+                        color="white",
+                        _hover={"bg": "#546E7A"},
+                    ),
+                    width="100%",
+                    justify="space-between",
+                ),
+                rx.hstack(
+                    rx.input(
+                        placeholder="BPM manual",
+                        on_change=State.set_manual_bpm,
+                        type_="number",
+                        width="50%",
+                    ),
+                    rx.button(
+                        "Usar BPM Manual",
+                        on_click=State.use_manual_bpm,
+                        bg="#009688",
+                        color="white",
+                        _hover={"bg": "#00897B"},
+                    ),
+                    width="100%",
+                    justify="space-between",
+                ),
+                rx.hstack(
+                    rx.button(
+                        "Descargar Audio Limpio",
+                        on_click=State.download_clean_audio,
+                        bg="#3F51B5",
+                        color="white",
+                        _hover={"bg": "#3949AB"},
+                    ),
+                    rx.button(
+                        "Descargar con Metrónomo",
+                        on_click=State.download_audio_with_metronome,
+                        bg="#673AB7",
+                        color="white",
+                        _hover={"bg": "#5E35B1"},
+                    ),
+                    width="100%",
+                    justify="space-between",
+                ),
+                rx.vstack(
+                    rx.text("Volumen del Metrónomo", color="white"),
+                    rx.slider(
+                        min_=-40,
+                        max_=0,
+                        step=1,
+                        default_value=-20,
+                        on_change=State.set_metronome_volume,
+                        width="100%",
+                    ),
+                    rx.button(
+                        "Vista Previa con Metrónomo",
+                        on_click=State.preview_with_metronome,
+                        bg="#E91E63",
+                        color="white",
+                        _hover={"bg": "#D81B60"},
+                    ),
                     width="100%",
                 ),
-                rx.button(
-                    "Vista Previa con Metrónomo",
-                    on_click=State.preview_with_metronome,
-                    bg="#E91E63",
-                    color="white",
-                    _hover={"bg": "#D81B60"},
+                rx.cond(
+                    State.show_thumbnail,
+                    rx.vstack(
+                        rx.image(
+                            src=State.video_info['thumbnail'],
+                            width="100%",
+                            max_width="480px",
+                            border_radius="md",
+                        ),
+                        rx.text(State.video_info['title'], color="white", font_weight="bold"),
+                        padding="4",
+                        bg="rgba(0, 0, 0, 0.5)",
+                        border_radius="md",
+                        width="100%",
+                    ),
+                ),
+                rx.cond(
+                    State.is_processing,
+                    rx.vstack(
+                        rx.text("Procesando...", color="white"),
+                        rx.progress(value=State.progress_value),
+                        width="100%",
+                    ),
+                ),
+                rx.text(State.status, color="rgba(255, 255, 255, 0.7)"),
+                rx.text(f"BPM: {State.bpm}", color="rgba(255, 255, 255, 0.7)"),
+                rx.cond(
+                    State.download_progress > 0,
+                    rx.vstack(
+                        rx.text("Progreso de descarga:", color="white"),
+                        rx.progress(value=State.download_progress),
+                        width="100%",
+                    ),
                 ),
                 width="100%",
+                max_width="600px",
+                spacing="4",
+                padding="6",
             ),
-            rx.cond(
-                State.show_thumbnail,
-                rx.vstack(
-                    rx.image(
-                        src=State.video_info['thumbnail'],
-                        width="100%",
-                        max_width="480px",
-                        border_radius="md",
-                    ),
-                    rx.text(State.video_info['title'], color="white", font_weight="bold"),
-                    padding="4",
-                    bg="rgba(0, 0, 0, 0.5)",
-                    border_radius="md",
-                    width="100%",
-                ),
-            ),
-            rx.cond(
-                State.is_processing,
-                rx.vstack(
-                    rx.text("Procesando...", color="white"),
-                    rx.progress(value=State.progress_value),
-                    width="100%",
-                ),
-            ),
-            rx.text(State.status, color="rgba(255, 255, 255, 0.7)"),
-            rx.text(f"BPM: {State.bpm}", color="rgba(255, 255, 255, 0.7)"),
-            rx.cond(
-                State.download_progress > 0,
-                rx.vstack(
-                    rx.text("Progreso de descarga:", color="white"),
-                    rx.progress(value=State.download_progress),
-                    width="100%",
-                ),
-            ),
-           
             width="100%",
-            max_width="600px",
-            spacing="4",
-            padding="6",
+            min_height="100vh",
+            bg="rgba(30, 30, 30, 0.7)",
+            backdrop_filter="blur(10px)",
+            display="flex",
+            justify_content="center",
+            align_items="center",
         ),
         width="100%",
         min_height="100vh",
-        bg="#1E1E1E",
-        display="flex",
-        justify_content="center",
-        align_items="center",
+        position="relative",
+        overflow="hidden",
     )
 
 app = rx.App()
