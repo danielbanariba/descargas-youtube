@@ -112,12 +112,16 @@ class State(rx.State):
 
             y, sr = librosa.load(self.audio_file, sr=None)
             duration = librosa.get_duration(y=y, sr=sr)
-            tempo, beats = librosa.beat.beat_track(y=y, sr=sr)
+            tempo, _ = librosa.beat.beat_track(y=y, sr=sr)
+            
+            # Generar tiempos de beats uniformemente basados en el BPM calculado
+            beat_duration = 60 / tempo
+            beat_times = np.arange(0, duration, beat_duration).tolist()
             
             async with self:
                 self.audio_duration = duration
                 self.bpm = round(float(tempo), 2)
-                self.beat_times = librosa.frames_to_time(beats, sr=sr).tolist()
+                self.beat_times = beat_times
                 self.progress_value = 100
                 self.status = f"Análisis completado. BPM: {self.bpm}"
 
@@ -160,7 +164,7 @@ class State(rx.State):
             sample_rate = 44100
             t = np.linspace(0, duration, int(sample_rate * duration), False)
             tone = np.sin(2 * np.pi * 1000 * t) * 0.5
-            fade = np.linspace(1, 0, len(tone))
+            fade = np.linspace(1, 0, len(t))
             tone = tone * fade
             stereo_tone = np.column_stack((tone, tone))
             metronome_sound = pygame.sndarray.make_sound((stereo_tone * 32767).astype(np.int16))
@@ -526,6 +530,7 @@ def index():
                     width="100%",
                 ),
             ),
+           
             width="100%",
             max_width="600px",
             spacing="4",
