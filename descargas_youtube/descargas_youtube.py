@@ -544,18 +544,25 @@ def index():
                 ),
                 rx.cond(
                     State.show_thumbnail,
-                    rx.vstack(
-                        rx.image(
-                            src=State.video_info['thumbnail'],
-                            width="100%",
-                            max_width="480px",
+                    rx.center(
+                        rx.vstack(
+                            rx.text(
+                                State.video_info['title'],
+                                color="white",
+                                font_weight="bold",
+                                text_align="center",  # Center the title text
+                                width="100%",  # Ensure the text takes full width for proper centering
+                            ),
+                            rx.image(
+                                src=State.video_info['thumbnail'],
+                                width="100%",
+                                border_radius="md",
+                                box_shadow="lg",  # Add a shadow effect to the image
+                            ),
+                            padding="4",
                             border_radius="md",
+                            width="100%",
                         ),
-                        rx.text(State.video_info['title'], color="white", font_weight="bold"),
-                        padding="4",
-                        bg="rgba(0, 0, 0, 0.5)",
-                        border_radius="md",
-                        width="100%",
                     ),
                 ),
                 rx.cond(
@@ -597,6 +604,3 @@ def index():
 
 app = rx.App()
 app.add_page(index)
-
-if __name__ == "__main__":
-    app.compile()
