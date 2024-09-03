@@ -34,61 +34,66 @@ class State(rx.State):
     progress_value: int = 0
     is_processing: bool = False
     tempo_option: str = "normal"
+    uploaded_audio: str = ""
 
     @rx.background
     async def get_info_and_analyze(self):
-        if not self.url:
+        if not self.url and not self.uploaded_audio:
             async with self:
-                self.status = "Por favor, ingresa una URL válida."
+                self.status = "Por favor, ingresa una URL válida o sube un archivo de audio."
             return
             
         try:
             async with self:
                 self.is_processing = True
                 self.progress_value = 0
-                self.status = "Obteniendo información del video..."
+                self.status = "Obteniendo información del audio..."
             
-            ydl_opts = {'quiet': True}
-            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                info = ydl.extract_info(self.url, download=False)
-            
-            async with self:
-                self.video_info = {
-                    'title': info['title'],
-                    'thumbnail': info['thumbnail']
+            if self.url:
+                ydl_opts = {'quiet': True}
+                with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                    info = ydl.extract_info(self.url, download=False)
+                
+                async with self:
+                    self.video_info = {
+                        'title': info['title'],
+                        'thumbnail': info['thumbnail']
+                    }
+                    self.show_thumbnail = True
+                    self.status = "Información del video obtenida. Comenzando análisis de audio..."
+                    self.progress_value = 25
+
+                temp_dir = tempfile.mkdtemp()
+                audio_file = os.path.join(temp_dir, 'audio.mp3')
+
+                def progress_hook(d):
+                    asyncio.create_task(self.download_progress_hook(d))
+
+                ydl_opts = {
+                    'format': 'bestaudio/best',
+                    'postprocessors': [{
+                        'key': 'FFmpegExtractAudio',
+                        'preferredcodec': 'mp3',
+                        'preferredquality': '192',
+                    }],
+                    'outtmpl': audio_file,
+                    'progress_hooks': [progress_hook],
+                    'keepvideo': False,
                 }
-                self.show_thumbnail = True
-                self.status = "Información del video obtenida. Comenzando análisis de audio..."
-                self.progress_value = 25
 
-            temp_dir = tempfile.mkdtemp()
-            audio_file = os.path.join(temp_dir, 'audio.mp3')
+                with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                    ydl.download([self.url])
 
-            def progress_hook(d):
-                asyncio.create_task(self.download_progress_hook(d))
-
-            ydl_opts = {
-                'format': 'bestaudio/best',
-                'postprocessors': [{
-                    'key': 'FFmpegExtractAudio',
-                    'preferredcodec': 'mp3',
-                    'preferredquality': '192',
-                }],
-                'outtmpl': audio_file,
-                'progress_hooks': [progress_hook],
-                'keepvideo': False,
-            }
-
-            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                ydl.download([self.url])
-
-            if not os.path.exists(audio_file):
-                original_file = audio_file.rsplit('.', 1)[0] + '.*'
-                original_files = glob.glob(original_file)
-                if original_files:
-                    os.rename(original_files[0], audio_file)
-                else:
-                    raise Exception(f"No se encontró ningún archivo de audio en: {temp_dir}")
+                if not os.path.exists(audio_file):
+                    original_file = audio_file.rsplit('.', 1)[0] + '.*'
+                    original_files = glob.glob(original_file)
+                    if original_files:
+                        os.rename(original_files[0], audio_file)
+                    else:
+                        raise Exception(f"No se encontró ningún archivo de audio en: {temp_dir}")
+            else:
+                audio_file = self.uploaded_audio
+                temp_dir = os.path.dirname(audio_file)
 
             async with self:
                 self.status = "Analizando el audio..."
@@ -119,6 +124,66 @@ class State(rx.State):
         finally:
             async with self:
                 self.is_processing = False
+
+    async def handle_upload(self, files: list[rx.UploadFile]):
+        """Handle the upload of file(s)."""
+        for file in files:
+            upload_data = await file.read()
+            outfile = rx.get_upload_dir() / file.filename
+
+            # Save the file
+            with outfile.open("wb") as file_object:
+                file_object.write(upload_data)
+
+            # Update the uploaded_audio var
+            self.uploaded_audio = str(outfile)
+            self.status = f"Archivo de audio subido: {file.filename}"
+
+        # Trigger the analysis event
+        return State.trigger_analysis
+
+    @rx.background
+    async def analyze_uploaded_audio(self):
+        """Analyze the uploaded audio file."""
+        if not self.uploaded_audio:
+            async with self:
+                self.status = "No se ha subido ningún archivo de audio."
+            return
+
+        try:
+            async with self:
+                self.is_processing = True
+                self.progress_value = 0
+                self.status = "Analizando el audio subido..."
+
+            y, sr = librosa.load(self.uploaded_audio, sr=None)
+            duration = librosa.get_duration(y=y, sr=sr)
+            tempo, _ = librosa.beat.beat_track(y=y, sr=sr)
+            
+            half_tempo = tempo / 2
+            double_tempo = tempo * 2
+            
+            async with self:
+                self.audio_file = self.uploaded_audio
+                self.audio_duration = duration
+                self.bpm = round(float(tempo), 2)
+                self.half_bpm = round(float(half_tempo), 2)
+                self.double_bpm = round(float(double_tempo), 2)
+                self.update_beat_times()
+                self.progress_value = 100
+                self.status = f"Análisis completado. BPM: {self.bpm} (Lento: {self.half_bpm}, Rápido: {self.double_bpm})"
+
+        except Exception as e:
+            async with self:
+                self.status = f"Error en el análisis: {str(e)}"
+        finally:
+            async with self:
+                self.is_processing = False
+
+    @rx.background
+    async def trigger_analysis(self):
+        """Trigger the analysis of the uploaded audio."""
+        yield State.analyze_uploaded_audio
 
     def update_beat_times(self):
         if self.tempo_option == "slow":
@@ -280,7 +345,7 @@ class State(rx.State):
             return
         
         try:
-            output_file = os.path.join(self.download_path, f"{self.video_info['title']}_clean.mp3")
+            output_file = os.path.join(self.download_path, f"{self.video_info.get('title', 'audio')}_clean.mp3")
             shutil.copy2(self.audio_file, output_file)
             self.status = f"Audio limpio descargado: {output_file}"
         except Exception as e:
@@ -320,7 +385,7 @@ class State(rx.State):
                 async with self:
                     self.progress_value = int((i + 1) / total_beats * 100)
             
-            output_file = os.path.join(self.download_path, f"{self.video_info['title']}_with_metronome.mp3")
+            output_file = os.path.join(self.download_path, f"{self.video_info.get('title', 'audio')}_with_metronome.mp3")
             audio.export(output_file, format="mp3")
             
             async with self:
@@ -347,8 +412,7 @@ class State(rx.State):
             audio = AudioSegment.from_mp3(self.audio_file)
 
             duration_ms = 20
-            metronome_sound = (Sine(880).to_audio_segment(duration=duration_ms)
-                                .fade_in(5).fade_out(15)
+            metronome_sound = (Sine(880).to_audio_segment(duration=duration_ms).fade_in(5).fade_out(15)
                                 .apply_gain(self.metronome_volume))
 
             preview_duration = min(10000, len(audio))
@@ -410,7 +474,7 @@ def index():
         ),
         rx.box(
             rx.vstack(
-                rx.heading("Descargador de YouTube con Metrónomo", size="lg", color="white"),
+                rx.heading("Analizador de Audio con Metrónomo", size="lg", color="white"),
                 rx.input(
                     placeholder="Ingresa la URL del video de YouTube",
                     on_change=State.set_url,
@@ -420,9 +484,28 @@ def index():
                     color="white",
                     _placeholder={"color": "rgba(255, 255, 255, 0.5)"},
                 ),
+                rx.text("O", color="white", font_weight="bold"),
+                rx.upload(
+                    rx.text(
+                        "Arrastra y suelta tu archivo de audio aquí o haz clic para seleccionar"
+                    ),
+                    id="audio_upload",
+                    border="1px dotted rgb(107,99,246)",
+                    padding="2em",
+                    multiple=False,
+                    accept={
+                        "audio/*": [".mp3", ".wav", ".flac", ".aac", ".ogg", ".m4a"]
+                    },
+                    max_files=1,
+                    on_drop=State.handle_upload(rx.upload_files(upload_id="audio_upload")),
+                ),
+                rx.hstack(
+                    rx.foreach(rx.selected_files("audio_upload"), rx.text),
+                    width="100%",
+                ),
                 rx.hstack(
                     rx.button(
-                        "Obtener Info y Analizar",
+                        "Analizar",
                         on_click=State.get_info_and_analyze,
                         bg="#4CAF50",
                         color="white",
