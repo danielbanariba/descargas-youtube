@@ -41,7 +41,7 @@ class State(rx.State):
             async with self:
                 self.status = "Por favor, ingresa una URL válida."
             return
-
+            
         try:
             async with self:
                 self.is_processing = True
@@ -467,7 +467,7 @@ def index():
                     rx.input(
                         placeholder="BPM manual",
                         on_change=State.set_manual_bpm,
-                        type_="number",
+                        type="number",
                         width="50%",
                     ),
                     rx.button(
@@ -526,8 +526,8 @@ def index():
                 rx.vstack(
                     rx.text("Volumen del Metrónomo", color="white"),
                     rx.slider(
-                        min_=-40,
-                        max_=0,
+                        min=-40,
+                        max=0,
                         step=1,
                         default_value=-20,
                         on_change=State.set_metronome_volume,
@@ -550,14 +550,14 @@ def index():
                                 State.video_info['title'],
                                 color="white",
                                 font_weight="bold",
-                                text_align="center",  # Center the title text
-                                width="100%",  # Ensure the text takes full width for proper centering
+                                text_align="center",
+                                width="100%",
                             ),
                             rx.image(
                                 src=State.video_info['thumbnail'],
                                 width="100%",
                                 border_radius="md",
-                                box_shadow="lg",  # Add a shadow effect to the image
+                                box_shadow="lg",
                             ),
                             padding="4",
                             border_radius="md",
