@@ -36,38 +36,31 @@ class State(rx.State):
     tempo_option: str = "normal"
     uploaded_audio: str = ""
 
-    @rx.background
     async def get_info_and_analyze(self):
         if not self.url and not self.uploaded_audio:
-            async with self:
-                self.status = "Por favor, ingresa una URL válida o sube un archivo de audio."
+            self.status = "Por favor, ingresa una URL válida o sube un archivo de audio."
             return
             
         try:
-            async with self:
-                self.is_processing = True
-                self.progress_value = 0
-                self.status = "Obteniendo información del audio..."
+            self.is_processing = True
+            self.progress_value = 0
+            self.status = "Obteniendo información del audio..."
             
             if self.url:
                 ydl_opts = {'quiet': True}
                 with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                     info = ydl.extract_info(self.url, download=False)
                 
-                async with self:
-                    self.video_info = {
-                        'title': info['title'],
-                        'thumbnail': info['thumbnail']
-                    }
-                    self.show_thumbnail = True
-                    self.status = "Información del video obtenida. Comenzando análisis de audio..."
-                    self.progress_value = 25
+                self.video_info = {
+                    'title': info['title'],
+                    'thumbnail': info['thumbnail']
+                }
+                self.show_thumbnail = True
+                self.status = "Información del video obtenida. Comenzando análisis de audio..."
+                self.progress_value = 25
 
                 temp_dir = tempfile.mkdtemp()
                 audio_file = os.path.join(temp_dir, 'audio.mp3')
-
-                def progress_hook(d):
-                    asyncio.create_task(self.download_progress_hook(d))
 
                 ydl_opts = {
                     'format': 'bestaudio/best',
@@ -77,7 +70,6 @@ class State(rx.State):
                         'preferredquality': '192',
                     }],
                     'outtmpl': audio_file,
-                    'progress_hooks': [progress_hook],
                     'keepvideo': False,
                 }
 
@@ -95,9 +87,8 @@ class State(rx.State):
                 audio_file = self.uploaded_audio
                 temp_dir = os.path.dirname(audio_file)
 
-            async with self:
-                self.status = "Analizando el audio..."
-                self.progress_value = 75
+            self.status = "Analizando el audio..."
+            self.progress_value = 75
 
             y, sr = librosa.load(audio_file, sr=None)
             duration = librosa.get_duration(y=y, sr=sr)
@@ -106,24 +97,21 @@ class State(rx.State):
             half_tempo = tempo / 2
             double_tempo = tempo * 2
             
-            async with self:
-                self.temp_dir = temp_dir
-                self.audio_file = audio_file
-                self.audio_duration = duration
-                self.bpm = round(float(tempo), 2)
-                self.half_bpm = round(float(half_tempo), 2)
-                self.double_bpm = round(float(double_tempo), 2)
-                self.update_beat_times()
-                self.progress_value = 100
-                self.status = f"Análisis completado. BPM: {self.bpm} (Lento: {self.half_bpm}, Rápido: {self.double_bpm})"
+            self.temp_dir = temp_dir
+            self.audio_file = audio_file
+            self.audio_duration = duration
+            self.bpm = round(float(tempo), 2)
+            self.half_bpm = round(float(half_tempo), 2)
+            self.double_bpm = round(float(double_tempo), 2)
+            self.update_beat_times()
+            self.progress_value = 100
+            self.status = f"Análisis completado. BPM: {self.bpm} (Lento: {self.half_bpm}, Rápido: {self.double_bpm})"
 
         except Exception as e:
-            async with self:
-                self.status = f"Error: {str(e)}"
-                self.show_thumbnail = False
+            self.status = f"Error: {str(e)}"
+            self.show_thumbnail = False
         finally:
-            async with self:
-                self.is_processing = False
+            self.is_processing = False
 
     async def handle_upload(self, files: list[rx.UploadFile]):
         """Handle the upload of file(s)."""
@@ -140,21 +128,18 @@ class State(rx.State):
             self.status = f"Archivo de audio subido: {file.filename}"
 
         # Trigger the analysis event
-        return State.trigger_analysis
+        return self.analyze_uploaded_audio
 
-    @rx.background
     async def analyze_uploaded_audio(self):
         """Analyze the uploaded audio file."""
         if not self.uploaded_audio:
-            async with self:
-                self.status = "No se ha subido ningún archivo de audio."
+            self.status = "No se ha subido ningún archivo de audio."
             return
 
         try:
-            async with self:
-                self.is_processing = True
-                self.progress_value = 0
-                self.status = "Analizando el audio subido..."
+            self.is_processing = True
+            self.progress_value = 0
+            self.status = "Analizando el audio subido..."
 
             y, sr = librosa.load(self.uploaded_audio, sr=None)
             duration = librosa.get_duration(y=y, sr=sr)
@@ -163,27 +148,23 @@ class State(rx.State):
             half_tempo = tempo / 2
             double_tempo = tempo * 2
             
-            async with self:
-                self.audio_file = self.uploaded_audio
-                self.audio_duration = duration
-                self.bpm = round(float(tempo), 2)
-                self.half_bpm = round(float(half_tempo), 2)
-                self.double_bpm = round(float(double_tempo), 2)
-                self.update_beat_times()
-                self.progress_value = 100
-                self.status = f"Análisis completado. BPM: {self.bpm} (Lento: {self.half_bpm}, Rápido: {self.double_bpm})"
+            self.audio_file = self.uploaded_audio
+            self.audio_duration = duration
+            self.bpm = round(float(tempo), 2)
+            self.half_bpm = round(float(half_tempo), 2)
+            self.double_bpm = round(float(double_tempo), 2)
+            self.update_beat_times()
+            self.progress_value = 100
+            self.status = f"Análisis completado. BPM: {self.bpm} (Lento: {self.half_bpm}, Rápido: {self.double_bpm})"
 
         except Exception as e:
-            async with self:
-                self.status = f"Error en el análisis: {str(e)}"
+            self.status = f"Error en el análisis: {str(e)}"
         finally:
-            async with self:
-                self.is_processing = False
+            self.is_processing = False
 
-    @rx.background
     async def trigger_analysis(self):
         """Trigger the analysis of the uploaded audio."""
-        yield State.analyze_uploaded_audio
+        return self.analyze_uploaded_audio
 
     def update_beat_times(self):
         if self.tempo_option == "slow":
@@ -206,7 +187,7 @@ class State(rx.State):
         else:
             self.status = f"Tempo establecido a normal: {self.bpm} BPM"
 
-    async def download_progress_hook(self, d):
+    def download_progress_hook(self, d):
         if d['status'] == 'downloading':
             p = d.get('_percent_str', '0%')
             p = re.sub(r'\x1b\[[0-9;]*[a-zA-Z]', '', p)
@@ -214,8 +195,7 @@ class State(rx.State):
             try:
                 percentage = float(p)
                 progress = int(percentage / 2)
-                async with self:
-                    self.progress_value = progress
+                self.progress_value = progress
             except ValueError:
                 print(f"No se pudo convertir el porcentaje: {p}")
 
@@ -282,39 +262,29 @@ class State(rx.State):
             self.is_playing = False
             self.status = "Reproducción detenida."
 
-    @rx.background
     async def download_video(self):
         if not self.video_info:
-            async with self:
-                self.status = "Por favor, obtén la información del video primero."
+            self.status = "Por favor, obtén la información del video primero."
             return
 
         try:
-            async with self:
-                self.is_processing = True
-                self.progress_value = 0
+            self.is_processing = True
+            self.progress_value = 0
             
-            def progress_hook(d):
-                asyncio.create_task(self.download_progress_hook(d))
-
             ydl_opts = {
                 'outtmpl': os.path.join(self.download_path, '%(title)s.%(ext)s'),
                 'format': 'bestaudio/best',
-                'progress_hooks': [progress_hook],
             }
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                async with self:
-                    self.status = f"Descargando: {self.video_info['title']}"
+                self.status = f"Descargando: {self.video_info['title']}"
                 ydl.download([self.url])
-            async with self:
-                self.status = "¡Descarga completada!"
-                self.progress_value = 100
+            
+            self.status = "¡Descarga completada!"
+            self.progress_value = 100
         except Exception as e:
-            async with self:
-                self.status = f"Error en la descarga: {str(e)}"
+            self.status = f"Error en la descarga: {str(e)}"
         finally:
-            async with self:
-                self.is_processing = False
+            self.is_processing = False
 
     def cleanup(self):
         if self.temp_dir and os.path.exists(self.temp_dir):
@@ -359,17 +329,14 @@ class State(rx.State):
         except ValueError:
             print(f"Error: No se pudo convertir '{value}' a float")
 
-    @rx.background
     async def download_audio_with_metronome(self):
         if not self.audio_file or not self.beat_times:
-            async with self:
-                self.status = "Por favor, analiza el audio primero."
+            self.status = "Por favor, analiza el audio primero."
             return
         
         try:
-            async with self:
-                self.is_processing = True
-                self.progress_value = 0
+            self.is_processing = True
+            self.progress_value = 0
             
             audio = AudioSegment.from_mp3(self.audio_file)
             
@@ -382,21 +349,17 @@ class State(rx.State):
             for i, beat_time in enumerate(self.beat_times):
                 position_ms = int(beat_time * 1000)
                 audio = audio.overlay(metronome_sound, position=position_ms)
-                async with self:
-                    self.progress_value = int((i + 1) / total_beats * 100)
+                self.progress_value = int((i + 1) / total_beats * 100)
             
             output_file = os.path.join(self.download_path, f"{self.video_info.get('title', 'audio')}_with_metronome.mp3")
             audio.export(output_file, format="mp3")
             
-            async with self:
-                self.status = f"Audio con metrónomo descargado: {output_file}"
-                self.progress_value = 100
+            self.status = f"Audio con metrónomo descargado: {output_file}"
+            self.progress_value = 100
         except Exception as e:
-            async with self:
-                self.status = f"Error al descargar audio con metrónomo: {str(e)}"
+            self.status = f"Error al descargar audio con metrónomo: {str(e)}"
         finally:
-            async with self:
-                self.is_processing = False
+            self.is_processing = False
 
     def preview_with_metronome(self):
         if not self.audio_file or not self.beat_times:
@@ -474,7 +437,7 @@ def index():
         ),
         rx.box(
             rx.vstack(
-                rx.heading("Analizador de Audio con Metrónomo", size="lg", color="white"),
+                rx.heading("Analizador de Audio con Metrónomo", size="3", color="white"),
                 rx.input(
                     placeholder="Ingresa la URL del video de YouTube",
                     on_change=State.set_url,
@@ -502,6 +465,7 @@ def index():
                 rx.hstack(
                     rx.foreach(rx.selected_files("audio_upload"), rx.text),
                     width="100%",
+                    spacing="3",
                 ),
                 rx.hstack(
                     rx.button(
@@ -544,7 +508,8 @@ def index():
                         _hover={"bg": "#546E7A"},
                     ),
                     width="100%",
-                    justify="space-between",
+                    justify="between",  # Cambiado de space-between a between
+                    spacing="3",
                 ),
                 rx.hstack(
                     rx.input(
@@ -561,7 +526,8 @@ def index():
                         _hover={"bg": "#00897B"},
                     ),
                     width="100%",
-                    justify="space-between",
+                    justify="between",  # Cambiado de space-between a between
+                    spacing="3",
                 ),
                 rx.hstack(
                     rx.button(
@@ -579,7 +545,8 @@ def index():
                         _hover={"bg": "#5E35B1"},
                     ),
                     width="100%",
-                    justify="space-between",
+                    justify="between",  # Cambiado de space-between a between
+                    spacing="3",
                 ),
                 rx.hstack(
                     rx.button(
@@ -604,7 +571,8 @@ def index():
                         _hover={"bg": "#1E88E5"},
                     ),
                     width="100%",
-                    justify="space-between",
+                    justify="between",  # Cambiado de space-between a between
+                    spacing="3",
                 ),
                 rx.vstack(
                     rx.text("Volumen del Metrónomo", color="white"),
@@ -624,6 +592,7 @@ def index():
                         _hover={"bg": "#D81B60"},
                     ),
                     width="100%",
+                    spacing="3",
                 ),
                 rx.cond(
                     State.show_thumbnail,
@@ -645,6 +614,7 @@ def index():
                             padding="4",
                             border_radius="md",
                             width="100%",
+                            spacing="3",
                         ),
                     ),
                 ),
@@ -654,6 +624,7 @@ def index():
                         rx.text("Procesando...", color="white"),
                         rx.progress(value=State.progress_value),
                         width="100%",
+                        spacing="3",
                     ),
                 ),
                 rx.text(State.status, color="rgba(255, 255, 255, 0.7)"),
@@ -664,6 +635,7 @@ def index():
                         rx.text("Progreso de descarga:", color="white"),
                         rx.progress(value=State.download_progress),
                         width="100%",
+                        spacing="3",
                     ),
                 ),
                 width="100%",
