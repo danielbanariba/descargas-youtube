@@ -418,6 +418,9 @@ class State(rx.State):
                 print(f"No se pudo eliminar {file}. Se intentará más tarde.")
         self.temp_files = [f for f in self.temp_files if os.path.exists(f)]
 
+    def set_url(self, value):
+        self.url = value
+
 def index():
     return rx.box(
         rx.cond(
